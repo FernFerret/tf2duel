@@ -1,6 +1,9 @@
 #include <sourcemod>
+#pragma semicolon 1
 
 #define PLUGIN_VERSION "0.1"
+
+new String:Players[50];
 
 public Plugin:myinfo =
 {
@@ -17,22 +20,27 @@ public OnPluginStart()
     AddCommandListener(Command_Say, "say");
     AddCommandListener(Command_Say, "say2");
     AddCommandListener(Command_Say, "say_team");
+    //HookEvent("player_spawn", PlayerSpawnEvent);
 }
+//public PlayerSpawnEvent(Handle:event, const String:name[], bool:dontBroadcast)
+//{
+//
+//}
 
 public Action:Command_Say(client, const String:command[], argc){
-    PrintToChatAll("Got it boss!");
+    PrintToServer("Got it boss!");
 
-    decl String:speech[192];
+    decl String:duelstring[192];
 
-    if (GetCmdArgString(speech, sizeof(speech)) < 1) {
+    if (GetCmdArgString(duelstring, sizeof(duelstring)) < 1) {
         return Plugin_Continue;
     }
 
     new startidx = 0;
     
-    if (speech[strlen(speech)-1] == '"')
+    if (duelstring[strlen(duelstring)-1] == '"')
     {
-        speech[strlen(speech)-1] = '\0';
+        duelstring[strlen(duelstring)-1] = '\0';
         startidx = 1;
     }
     
@@ -40,12 +48,20 @@ public Action:Command_Say(client, const String:command[], argc){
     {
         startidx += 4;
     }
-    if (strcmp(speech[startidx],"!duel",false) == 0) {
-        PrintToChatAll("Let's do this....");
+    new thing = StrContains(duelstring[startidx], "!duel", false);
+    if (thing == 0) {
+        // They DID start with !duel
+        new spaceloc = StrContains(duelstring[startidx], " ", false);
+        if (spaceloc != -1) {
+            // Cool, there's a space, they gave a name! get that name!
+            ReplaceString(duelstring, 192, "!duel ", "", false);
+            new didstrip = StripQuotes(duelstring);
+            PrintToServer("Let's do this....'%s' %b", duelstring, didstrip);
+            PrintToServer("Let's do this....%d", spaceloc);
+        }
     }
     else {
-        PrintToChatAll("nope.avi");
-        PrintToChatAll(speech[startidx]);
+        PrintToServer("nope.avi");
     }
     
     return Plugin_Continue;
