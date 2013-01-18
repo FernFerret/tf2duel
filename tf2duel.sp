@@ -1,15 +1,16 @@
 #include <sourcemod>
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "0.1"
+#define PLUGIN_VERSION "0.2"
 
 new requests[MAXPLAYERS];
 new duels[MAXPLAYERS];
 new duelscorea[MAXPLAYERS];
 new duelscoreb[MAXPLAYERS];
+new String:challengerName[256];
+new String:victimName[256];
 
-public Plugin:myinfo =
-{
+public Plugin:myinfo = {
     name = "TF2 Duel",
     author = "FernFerret",
     description = "Duel other players! Don't win any prizes!",
@@ -17,8 +18,7 @@ public Plugin:myinfo =
     url = "http://fernferret.github.com"
 };
 
-public OnPluginStart()
-{
+public OnPluginStart() {
     PrintToServer("Starting the things!");
     AddCommandListener(Command_Say, "say");
     AddCommandListener(Command_Say, "say2");
@@ -27,16 +27,14 @@ public OnPluginStart()
     HookEvent("teamplay_round_win", onRoundOver);
     HookEvent("teamplay_suddendeath_begin", onRoundOver);
 }
+
 public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
     for (new i = 1; i <= MaxClients; i++) {
         if (duels[i] != 0) {
             // The challenger is i
             new challenger = i;
             new victim = duels[i];
-            decl String:challengerName[256];
-            decl String:victimName[256];
-            GetClientName(challenger, challengerName, 256);
-            GetClientName(victim, victimName, 256);
+            getNames(challenger, victim);
             if (duelscorea[challenger] > duelscoreb[challenger]) {
                 PrintToChat(victim, "%s defeated %s with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
                 PrintToChat(challenger, "%s defeated %s with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
@@ -54,16 +52,24 @@ public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
         }
     }
 }
+
 public resetDuel(slot) {
     duels[slot] = 0;
     requests[slot] = 0;
     duelscorea[slot] = 0;
     duelscoreb[slot] = 0;
 }
-public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
-{
-    decl String:challengerName[256];
-    decl String:victimName[256];
+
+public getNames(challenger, victim) {
+    if (challenger > 0) {
+        GetClientName(challenger, challengerName, 256);
+    }
+    if (victim > 0) {
+        GetClientName(victim, victimName, 256);
+    }
+}
+
+public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
     new victim = GetClientOfUserId(GetEventInt(event, "userid"));
     new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
     new assister = GetClientOfUserId(GetEventInt(event, "assister"));
@@ -95,105 +101,65 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
             GetClientName(victim, challengerName, 256);
         }
         if (increment) {
-            PrintToChat(victim, "The score is: %s: %d, %s:%d", challengerName, duelscorea[i], victimName, duelscoreb[i]);
-            PrintToChat(attacker, "The score is: %s: %d, %s:%d", challengerName, duelscorea[i], victimName, duelscoreb[i]);
+            getNames(attacker, victim);
+            PrintToChatAll("The score is: %s: %d, %s:%d", challengerName, duelscorea[i], victimName, duelscoreb[i]);
             break;
         }
     }
 }
 
-public playerCanAcceptDuel(victim) {
-    for (new i = 1; i <= MaxClients; i++) {
-        // Check the challenger
-        if (duels[i] == victim) {
-            // No, already in a duel
-            PrintToServer("Already dueling: %d", i);
-            return false;
-        }
-        if (i == victim && duels[i] != 0) {
-            // No, already in a duel
-            PrintToServer("Already dueling: %d", duels[i]);
-            return false;
-        }
-    }
-    PrintToServer("Not dueling!");
-    return true;
-}
-
-public isPlayerValid(const String:searchName[], client) {
-    // Get the in game clients
-    new bool:foundmatch = false;
-    new bool:multimatch = false;
-    new maxplayers = MaxClients;
-    new maxNameLength = 256;
-    new clientmatch = 0;
-    new duelpartner = -1;
-    decl String:nameString[maxNameLength];
-    decl String:steamIDString[maxNameLength];
-    for (new i = 1; i <= maxplayers; i++) {
-        if (IsClientInGame(i)) {
-            GetClientName(i, nameString, maxNameLength);
-            //GetClientAuthString(i, steamIDString, maxNameLength);
-            clientmatch = StrContains(nameString, searchName, false);
-            PrintToServer("Looking at... %s", nameString);
-            if (clientmatch > -1) {
-                if (foundmatch) {
-                    multimatch = true;
-                }
-                // We got a match!
-                PrintToServer("Found matching client: %s", nameString);
-                foundmatch = true;
-                duelpartner = i;
-            }
-        }
-    }
-    if (multimatch) {
-        PrintToServer("Whoops! Multiple matches!");
-        PrintToChat(client, "Sorry! '%s' matched multiple players on the other team! Be more specific!", searchName);
-        return -1;
-    }
-    if (!foundmatch) {
-        PrintToChat(client, "Sorry! '%s' didn't match anyone on the other team!", searchName);
-        return -1;
-    }
-    // Ok we have a match. Let's do work!
-    if (client == duelpartner) {
+public checkPartner(client, partner) {
+    if (client == partner) {
         PrintToChat(client, "Sorry! You can't duel yourself!");
         return -1;
     }
     // Get the name
-    GetClientName(duelpartner, nameString, maxNameLength);
+    getNames(-1, partner);
     // Get the team
-    new partnerteam = GetClientTeam(duelpartner);
-    new mainteam = GetClientTeam(client);
-    if (mainteam < 2) {
+    new partnerteam = GetClientTeam(partner);
+    new clientteam = GetClientTeam(client);
+    if (clientteam < 2) {
         PrintToChat(client, "Sorry! You can't duel from spectator!");
         return -1;
     }
     if (partnerteam < 2) {
-        PrintToChat(client, "Sorry! %s isn't on a team!", nameString);
+        PrintToChat(client, "Sorry! %s isn't on a team!", victimName);
         return -1;
     }
-    if (mainteam == partnerteam) {
-        PrintToChat(client, "Sorry! You can't duel %s, because they're on your team!", nameString);
+    if (clientteam == partnerteam) {
+        PrintToChat(client, "Sorry! You can't duel %s, because they're on your team!", victimName);
         return -1;
     }
-    if (!playerCanAcceptDuel(duelpartner)) {
+    if (isDueling(partner)) {
         //TODO: Make this say who.
-        PrintToChat(client, "Sorry! %s is already dueling!(%d)", nameString);
+        PrintToChat(client, "Sorry! %s is already dueling!(%d)", victimName);
         return -1;
     }
-    
-    PrintToChat(client, "Yay%d! %s", client, nameString);
-    return duelpartner;
+    return partner;
+}
+
+public isDueling(client) {
+    for (new i = 1; i <= MaxClients; i++) {
+        // Check the challenger
+        if (duels[i] == client) {
+            // No, already in a duel
+            PrintToServer("Already dueling: %d", i);
+            return true;
+        }
+        if (i == client && duels[i] != 0) {
+            // No, already in a duel
+            PrintToServer("Already dueling: %d", duels[i]);
+            return true;
+        }
+    }
+    PrintToServer("Not dueling!");
+    return false;
 }
 
 public Action:Command_Say(client, const String:command[], argc){
     PrintToServer("Got it boss!");
 
     decl String:duelstring[192];
-    decl String:challengerName[256];
-    decl String:victimName[256];
 
     if (GetCmdArgString(duelstring, sizeof(duelstring)) < 1) {
         return Plugin_Continue;
@@ -218,29 +184,80 @@ public Action:Command_Say(client, const String:command[], argc){
             // Cool, there's a space, they gave a name! get that name!
             ReplaceString(duelstring, 192, "!duel ", "", false);
             ReplaceString(duelstring, 192, "\"", "", false);
-            new partner = isPlayerValid(duelstring, client);
-            if (partner < 0) {
-                return Plugin_Continue;
-            }
-            GetClientName(client, challengerName, 256);
-            requests[client] = partner;            
-            PrintCenterText(partner, "%s has challanged you to a duel!", challengerName);
-            PrintToChat(partner, "Type \"!accept\" to Mann Up!");
+            offerDuel(client, duelstring);
         }
     }
     thing = StrContains(duelstring[startidx], "!accept", false);
     if (thing == 0) {
-        if (playerCanAcceptDuel(client)) {
-            for(new i = 1; i < MAXPLAYERS; i++) {
-                if (requests[i] == client) {
-                    GetClientName(i, challengerName, 256);
-                    GetClientName(client, victimName, 256);
-                    PrintToChat(i, "%s has accepted your duel request!", victimName);
-                    PrintToChat(client, "You have accepted %s's duel request!", challengerName);
-                    duels[i] = client;
-                }
-            }
-        }
+        acceptDuel(client);
     } 
     return Plugin_Continue;
+}
+
+public findPlayer(client, const String:search[]) {
+    new bool:foundmatch = false;
+    new bool:multimatch = false;
+    new maxNameLength = 256;
+    new clientmatch = 0;
+    new duelpartner = -1;
+    decl String:nameString[maxNameLength];
+    for (new i = 1; i <= MaxClients; i++) {
+        if (IsClientInGame(i)) {
+            GetClientName(i, nameString, maxNameLength);
+            PrintToServer("Looking at... %s", nameString);
+            if (StrContains(nameString, search, false) > -1) {
+                if (foundmatch) {
+                    multimatch = true;
+                }
+                // We got a match!
+                PrintToServer("Found matching client: %s", nameString);
+                foundmatch = true;
+                clientmatch = i;
+            }
+        }
+    }
+    if (multimatch) {
+        PrintToServer("Whoops! Multiple matches!");
+        PrintToChat(client, "Sorry! '%s' matched multiple players! Be more specific!", search);
+        return -1;
+    }
+    if (!foundmatch) {
+        PrintToChat(client, "Sorry! '%s' didn't match anyone!", search);
+        return -1;
+    }
+    return clientmatch;
+}
+
+public offerDuel(challenger, const String:victimString[]) {
+    // Search for a player with a fluffy string (not full name).
+    new victim = findPlayer(challenger, victimString);
+    // If we don't find a player, return.
+    if (victim < 1) {
+        return false;
+    }
+    // Run through another series of checks for valididity
+    victim = checkPartner(challenger, victim);
+    if (victim < 1) {
+        return false;
+    }
+    // Add a request.
+    requests[challenger] = victim;            
+    PrintCenterText(victim, "%s has challanged you to a duel!", challengerName);
+    PrintToChat(victim, "Type \"!accept\" to Mann Up!");
+}
+
+public acceptDuel(victim) {
+    if (!isDueling(victim)) {
+        for(new i = 1; i < MAXPLAYERS; i++) {
+            if (requests[i] == victim) {
+                GetClientName(i, challengerName, 256);
+                GetClientName(victim, victimName, 256);
+                PrintToChat(i, "%s has accepted your duel request!", victimName);
+                PrintToChat(victim, "You have accepted %s's duel request!", challengerName);
+                duels[i] = victim;
+                return true;
+            }
+        }
+    }
+    return false;
 }
