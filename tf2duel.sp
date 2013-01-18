@@ -3,12 +3,14 @@
 
 #define PLUGIN_VERSION "0.2"
 
+const MAXNAMELENGTH = 256;
+
 new requests[MAXPLAYERS];
 new duels[MAXPLAYERS];
 new duelscorea[MAXPLAYERS];
 new duelscoreb[MAXPLAYERS];
-new String:challengerName[256];
-new String:victimName[256];
+new String:challengerName[MAXNAMELENGTH];
+new String:victimName[MAXNAMELENGTH];
 
 public Plugin:myinfo = {
     name = "TF2 Duel",
@@ -29,6 +31,10 @@ public OnPluginStart() {
 }
 
 public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
+    finalizeDuels();
+}
+
+public finalizeDuels() {
     for (new i = 1; i <= MaxClients; i++) {
         if (duels[i] != 0) {
             // The challenger is i
@@ -36,20 +42,15 @@ public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
             new victim = duels[i];
             getNames(challenger, victim);
             if (duelscorea[challenger] > duelscoreb[challenger]) {
-                PrintToChat(victim, "%s defeated %s with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
-                PrintToChat(challenger, "%s defeated %s with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
-                
+                PrintToChatAll("%s defeated %s with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
             } else if (duelscorea[challenger] < duelscoreb[challenger]) {
-                PrintToChat(victim, "%s defeated %s with a score of %d to %d!", victimName, challengerName , duelscoreb[i], duelscorea[i]);
-                PrintToChat(challenger, "%s defeated %s with a score of %d to %d!", victimName, challengerName , duelscoreb[i], duelscorea[i]);
+                PrintToChatAll("%s defeated %s with a score of %d to %d!", victimName, challengerName , duelscoreb[i], duelscorea[i]);
             } else {
-                PrintToChat(victim, "You're both losers! %s and %s tied with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
-                PrintToChat(challenger, "You're both losers! %s and %s tied with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
-
+                PrintToChatAll("You're both losers! %s and %s tied with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
             }
-            // Now reset the duels
-            resetDuel(i);
         }
+        // Now reset the duels, regardless if the duelstatus was set.
+        resetDuel(i);
     }
 }
 
@@ -62,10 +63,10 @@ public resetDuel(slot) {
 
 public getNames(challenger, victim) {
     if (challenger > 0) {
-        GetClientName(challenger, challengerName, 256);
+        GetClientName(challenger, challengerName, MAXNAMELENGTH);
     }
     if (victim > 0) {
-        GetClientName(victim, victimName, 256);
+        GetClientName(victim, victimName, MAXNAMELENGTH);
     }
 }
 
@@ -83,25 +84,28 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
             // Make sure we got the right person in the kill
             if (i != attacker) {
                 attacker = assister;
-            } 
-            GetClientName(victim, victimName, 256);
-            GetClientName(attacker, challengerName, 256);
+            }
+            // Don't Call getNames here!
+            GetClientName(victim, victimName, MAXNAMELENGTH);
+            GetClientName(attacker, challengerName, MAXNAMELENGTH);
         }
         else if (i == victim && ((attacker > 0 && duels[i] == attacker) || (assister > 0 && duels[i] == assister))) {
             PrintToServer("Putting a point in Score B: %d", i);
             PrintToServer("Assister: %d", assister);
-            
+
             duelscoreb[i]++;
             increment = true;
             // Make sure we got the right person in the kill
             if (duels[i] != attacker) {
                 attacker = assister;
-            } 
-            GetClientName(attacker, victimName, 256);
-            GetClientName(victim, challengerName, 256);
+            }
+            // Don't Call getNames here!
+            GetClientName(attacker, victimName, MAXNAMELENGTH);
+            GetClientName(victim, challengerName, MAXNAMELENGTH);
         }
         if (increment) {
-            getNames(attacker, victim);
+            // Don't Call getNames here!
+            // We're doing shenanigans with the names.
             PrintToChatAll("The score is: %s: %d, %s:%d", challengerName, duelscorea[i], victimName, duelscoreb[i]);
             break;
         }
@@ -131,29 +135,37 @@ public checkPartner(client, partner) {
         return -1;
     }
     if (isDueling(partner)) {
-        //TODO: Make this say who.
-        PrintToChat(client, "Sorry! %s is already dueling!(%d)", victimName);
+        //Get the name of the person who the victim is already dueling!
+        getNames(getDuelPartner(partner), -1);
+        PrintToChat(client, "Sorry! %s is already dueling %s!", victimName, challengerName);
         return -1;
     }
     return partner;
 }
 
 public isDueling(client) {
+    if (getDuelPartner(client) != -1) {
+        return true;
+    }
+    return false;
+}
+
+public getDuelPartner(client) {
     for (new i = 1; i <= MaxClients; i++) {
         // Check the challenger
         if (duels[i] == client) {
             // No, already in a duel
             PrintToServer("Already dueling: %d", i);
-            return true;
+            return i;
         }
         if (i == client && duels[i] != 0) {
             // No, already in a duel
             PrintToServer("Already dueling: %d", duels[i]);
-            return true;
+            return duels[i];
         }
     }
     PrintToServer("Not dueling!");
-    return false;
+    return -1;
 }
 
 public Action:Command_Say(client, const String:command[], argc){
@@ -165,13 +177,13 @@ public Action:Command_Say(client, const String:command[], argc){
         return Plugin_Continue;
     }
     new startidx = 0;
-    
+
     if (duelstring[strlen(duelstring)-1] == '"')
     {
         duelstring[strlen(duelstring)-1] = '\0';
         startidx = 1;
     }
-    
+
     if (strcmp(command, "say2", false) == 0)
     {
         startidx += 4;
@@ -190,20 +202,18 @@ public Action:Command_Say(client, const String:command[], argc){
     thing = StrContains(duelstring[startidx], "!accept", false);
     if (thing == 0) {
         acceptDuel(client);
-    } 
+    }
     return Plugin_Continue;
 }
 
 public findPlayer(client, const String:search[]) {
     new bool:foundmatch = false;
     new bool:multimatch = false;
-    new maxNameLength = 256;
-    new clientmatch = 0;
-    new duelpartner = -1;
-    decl String:nameString[maxNameLength];
+    new clientmatch = -1;
+    decl String:nameString[MAXNAMELENGTH];
     for (new i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i)) {
-            GetClientName(i, nameString, maxNameLength);
+            GetClientName(i, nameString, MAXNAMELENGTH);
             PrintToServer("Looking at... %s", nameString);
             if (StrContains(nameString, search, false) > -1) {
                 if (foundmatch) {
@@ -241,19 +251,19 @@ public offerDuel(challenger, const String:victimString[]) {
         return false;
     }
     // Add a request.
-    requests[challenger] = victim;            
+    requests[challenger] = victim;
+    getNames(challenger, -1);
     PrintCenterText(victim, "%s has challanged you to a duel!", challengerName);
     PrintToChat(victim, "Type \"!accept\" to Mann Up!");
+    return true;
 }
 
 public acceptDuel(victim) {
     if (!isDueling(victim)) {
         for(new i = 1; i < MAXPLAYERS; i++) {
             if (requests[i] == victim) {
-                GetClientName(i, challengerName, 256);
-                GetClientName(victim, victimName, 256);
-                PrintToChat(i, "%s has accepted your duel request!", victimName);
-                PrintToChat(victim, "You have accepted %s's duel request!", challengerName);
+                getNames(i, victim);
+                PrintToChatAll("%s has accepted %s's duel request!", victimName, challengerName);
                 duels[i] = victim;
                 return true;
             }
