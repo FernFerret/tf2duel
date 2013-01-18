@@ -1,4 +1,6 @@
 #include <sourcemod>
+#include <tf2>
+#include <morecolors>
 #pragma semicolon 1
 
 #define PLUGIN_VERSION "0.2"
@@ -209,13 +211,21 @@ public Action:Command_Say(client, const String:command[], argc){
 public findPlayer(client, const String:search[]) {
     new bool:foundmatch = false;
     new bool:multimatch = false;
+    new clientteam = GetClientTeam(client);
+    new matchteam = -1;
+    new searchteam = _:TFTeam_Red;
+    if (clientteam == searchteam) {
+        searchteam = _:TFTeam_Blue;
+    }
     new clientmatch = -1;
     decl String:nameString[MAXNAMELENGTH];
     for (new i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i)) {
             GetClientName(i, nameString, MAXNAMELENGTH);
+            // Eliminate some work by removing other team players.
+            matchteam = GetClientTeam(i);
             PrintToServer("Looking at... %s", nameString);
-            if (StrContains(nameString, search, false) > -1) {
+            if (matchteam == searchteam && StrContains(nameString, search, false) > -1) {
                 if (foundmatch) {
                     multimatch = true;
                 }
@@ -228,7 +238,7 @@ public findPlayer(client, const String:search[]) {
     }
     if (multimatch) {
         PrintToServer("Whoops! Multiple matches!");
-        PrintToChat(client, "Sorry! '%s' matched multiple players! Be more specific!", search);
+        PrintToChat(client, "Sorry! '%s' matched multiple players on the other team! Be more specific!", search);
         return -1;
     }
     if (!foundmatch) {
@@ -246,7 +256,6 @@ public offerDuel(challenger, const String:victimString[]) {
         return false;
     }
     // Run through another series of checks for valididity
-    victim = checkPartner(challenger, victim);
     if (victim < 1) {
         return false;
     }
