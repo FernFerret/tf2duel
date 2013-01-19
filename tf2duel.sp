@@ -5,17 +5,23 @@
 #pragma semicolon 1
 
 #define PLUGIN_VERSION "0.2"
+#define CHALLENGE_SND         "ui/duel_challenge.wav"
+#define CHALLENGE_ACCEPT_SND  "ui/duel_challenge_accepted.wav"
+#define DUEL_SCORE_SND        "ui/duel_event.wav"
+#define DUEL_SCORE_BEHIND_SND "ui/duel_score_behind.wav"
+
 
 const MAXNAMELENGTH = 256;
 
 new requests[MAXPLAYERS];
 new duels[MAXPLAYERS];
-new duelscorea[MAXPLAYERS];
-new duelscoreb[MAXPLAYERS];
+new dsChallenger[MAXPLAYERS];
+new dsVictim[MAXPLAYERS];
 new String:challengerName[MAXNAMELENGTH];
 new String:victimName[MAXNAMELENGTH];
 new String:lastToDisconnectName[MAXNAMELENGTH];
 new lastToDisconnect = 0;
+new Handle:scoreTrie = INVALID_HANDLE;
 
 public Plugin:myinfo = {
     name = "TF2 Duel",
@@ -35,10 +41,10 @@ public OnPluginStart() {
     HookEvent("player_disconnect", onPlayerDisconnect);
     HookEvent("teamplay_round_win", onRoundOver);
     HookEvent("teamplay_suddendeath_begin", onRoundOver);
-    PrecacheSound("ui/duel_challenge.wav");
-    PrecacheSound("ui/duel_challenge_accepted.wav");
-    PrecacheSound("ui/duel_event.wav");
-    PrecacheSound("ui/duel_score_behind.wav");
+    PrecacheSound(CHALLENGE_SND);
+    PrecacheSound(CHALLENGE_ACCEPT_SND);
+    PrecacheSound(DUEL_SCORE_SND);
+    PrecacheSound(DUEL_SCORE_BEHIND_SND);
 }
 
 public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
@@ -59,8 +65,6 @@ public Action:onChangeTeam(Handle:event, const String:name[], bool:dontBroadcast
         client = lastToDisconnect;
         lastToDisconnect = 0;
     }
-    PrintToChatAll("This client is changing: %d %b", client, isDueling(client));
-    PrintToServer("This client is changing: %d %b", client, isDueling(client));
     // If they're not dueling, we don't care.
     if (!isDueling(client)) {
         return Plugin_Continue;
@@ -80,12 +84,12 @@ public finalizeDuels() {
             new challenger = i;
             new victim = duels[i];
             getNames(challenger, victim);
-            if (duelscorea[challenger] > duelscoreb[challenger]) {
-                PrintToChatAll("%s defeated %s with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
-            } else if (duelscorea[challenger] < duelscoreb[challenger]) {
-                PrintToChatAll("%s defeated %s with a score of %d to %d!", victimName, challengerName , duelscoreb[i], duelscorea[i]);
+            if (dsChallenger[challenger] > dsVictim[challenger]) {
+                PrintToChatAll("%s defeated %s with a score of %d to %d!", challengerName, victimName , dsChallenger[i], dsVictim[i]);
+            } else if (dsChallenger[challenger] < dsVictim[challenger]) {
+                PrintToChatAll("%s defeated %s with a score of %d to %d!", victimName, challengerName , dsVictim[i], dsChallenger[i]);
             } else {
-                PrintToChatAll("You're both losers! %s and %s tied with a score of %d to %d!", challengerName, victimName , duelscorea[i], duelscoreb[i]);
+                PrintToChatAll("You're both losers! %s and %s tied with a score of %d to %d!", challengerName, victimName , dsChallenger[i], dsVictim[i]);
             }
         }
         // Now reset the duels, regardless if the duelstatus was set.
@@ -96,10 +100,7 @@ public finalizeDuels() {
 // Used if a player changes or disconnects
 public overrideDuel(loser, disconnect) {
     new partner = getDuelPartner(loser);
-    PrintToChatAll("This client is a loser: %d", loser);
-    PrintToChatAll("Partner: %d", partner);
     new duelid = getDuelId(loser);
-    PrintToChatAll("Duelid: %d", duelid);
     if (partner < 1 || duelid < 1) {
         return false;
     }
@@ -111,23 +112,23 @@ public overrideDuel(loser, disconnect) {
         getNames(loser, partner);
     }
     if (isChallenger(loser) == 1) {
-        if(duelscorea[duelid] >= duelscoreb[duelid]) {
+        if(dsChallenger[duelid] >= dsVictim[duelid]) {
             // Reset the score because this guy was in the lead.
-            duelscorea[duelid] = 0;
-            if (duelscoreb[duelid] == 0) {
-                duelscoreb[duelid] = 1;
+            dsChallenger[duelid] = 0;
+            if (dsVictim[duelid] == 0) {
+                dsVictim[duelid] = 1;
             }
         }
-        PrintToChatAll("%s chickened out, so %s won with a score of %d to %d!1", challengerName, victimName, duelscoreb[duelid], duelscorea[duelid]);
+        PrintToChatAll("%s chickened out, so %s won with a score of %d to %d!1", challengerName, victimName, dsVictim[duelid], dsChallenger[duelid]);
     } else {
-        if(duelscorea[duelid] <= duelscoreb[duelid]) {
+        if(dsChallenger[duelid] <= dsVictim[duelid]) {
             // Reset the score because this guy was in the lead.
-            duelscoreb[duelid] = 0;
-            if (duelscorea[duelid] == 0) {
-                duelscorea[duelid] = 1;
+            dsVictim[duelid] = 0;
+            if (dsChallenger[duelid] == 0) {
+                dsChallenger[duelid] = 1;
             }
         }
-        PrintToChatAll("%s chickened out, so %s won with a score of %d to %d!", challengerName, victimName, duelscorea[duelid], duelscoreb[duelid]);
+        PrintToChatAll("%s chickened out, so %s won with a score of %d to %d!", challengerName, victimName, dsChallenger[duelid], dsVictim[duelid]);
     }
     // Reset this duelid
     resetDuel(duelid);
@@ -167,8 +168,8 @@ public getDuelId(client) {
 public resetDuel(slot) {
     duels[slot] = 0;
     requests[slot] = 0;
-    duelscorea[slot] = 0;
-    duelscoreb[slot] = 0;
+    dsChallenger[slot] = 0;
+    dsVictim[slot] = 0;
 }
 
 public getNames(challenger, victim) {
@@ -189,7 +190,7 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
         if (((attacker > 0 && i == attacker) || (assister > 0 && assister == i)) && duels[i] == victim) {
             PrintToServer("Putting a point in Score A: %d", i);
             PrintToServer("Assister: %d", assister);
-            duelscorea[i]++;
+            dsChallenger[i]++;
             increment = true;
             // Make sure we got the right person in the kill
             if (i != attacker) {
@@ -203,7 +204,7 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
             PrintToServer("Putting a point in Score B: %d", i);
             PrintToServer("Assister: %d", assister);
 
-            duelscoreb[i]++;
+            dsVictim[i]++;
             increment = true;
             // Make sure we got the right person in the kill
             if (duels[i] != attacker) {
@@ -218,7 +219,7 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
             // Don't Call getNames here!
             // We're doing shenanigans with the names.
 
-            PrintToChatAll("The score is: %s: %d, %s: %d", challengerName, duelscorea[i], victimName, duelscoreb[i]);
+            PrintToChatAll("The score is: %s: %d, %s: %d", challengerName, dsChallenger[i], victimName, dsVictim[i]);
             break;
         }
     }
@@ -237,15 +238,15 @@ public playScoreSounds(attacker, victim) {
                 victim = attacker;
             }
             // The challenger's score is in A
-            if (duelscorea[challenger] > duelscoreb[challenger]) {
-                EmitSoundToClient(challenger, "ui/duel_event.wav");
-                EmitSoundToClient(victim, "ui/duel_score_behind.wav");
-            } else if (duelscorea[challenger] < duelscoreb[challenger]) {
-                EmitSoundToClient(challenger, "ui/duel_score_behind.wav");
-                EmitSoundToClient(victim, "ui/duel_event.wav");
+            if (dsChallenger[challenger] > dsVictim[challenger]) {
+                EmitSoundToClient(challenger, DUEL_SCORE_SND);
+                EmitSoundToClient(victim, DUEL_SCORE_BEHIND_SND);
+            } else if (dsChallenger[challenger] < dsVictim[challenger]) {
+                EmitSoundToClient(challenger, DUEL_SCORE_BEHIND_SND);
+                EmitSoundToClient(victim, DUEL_SCORE_SND);
             } else {
-                EmitSoundToClient(challenger, "ui/duel_event.wav");
-                EmitSoundToClient(victim, "ui/duel_event.wav");
+                EmitSoundToClient(challenger, DUEL_SCORE_SND);
+                EmitSoundToClient(victim, DUEL_SCORE_SND);
             }
             break;
         }
@@ -402,14 +403,38 @@ public bool:offerDuel(challenger, const String:victimString[]) {
         acceptDuel(challenger);
         return false;
     }
+    // Make sure someone hasn't already requested a duel
+    getNames(challenger, victim);
+    if (hasOpenRequest(victim)) {
+        PrintToChat(challenger, "%s has already been asked to duel, try again later!", victimName);
+        return false;
+    }
     // Add a request.
     requests[challenger] = victim;
-    getNames(challenger, -1);
     PrintCenterText(victim, "%s has challenged you to a duel!", challengerName);
     PrintToChat(victim, "Type \"!accept\" to Mann Up!");
-    EmitSoundToClient(victim, "ui/duel_challenge.wav");
-    EmitSoundToClient(challenger, "ui/duel_challenge.wav");
+    EmitSoundToClient(victim, CHALLENGE_SND);
+    EmitSoundToClient(challenger, CHALLENGE_SND);
+    CreateTimer(20.0, cancelRequest, challenger);
     return true;
+}
+
+// Cancel the request, either manually or automatically!
+// returns true on a cancel, false if the duel is already going on.
+public Action:cancelRequest(Handle:timer, any:challenger) {
+    PrintToChatAll("Maybe no duel?");
+    if (duels[challenger] != 0) {
+        return Plugin_Continue;
+    }
+    if (requests[challenger] == 0) {
+        // there was nothing
+        return Plugin_Continue;
+    }
+    new victim = requests[challenger];
+    requests[challenger] = 0;
+    getNames(challenger, victim);
+    PrintToChatAll("%s is far too cowardly to duel %s. For. Shame.", victimName, challengerName);
+    return Plugin_Continue;
 }
 
 public bool:hasOpenRequest(victim) {
@@ -429,8 +454,8 @@ public acceptDuel(victim) {
                 getNames(i, victim);
                 PrintToChatAll("%s has accepted %s's duel request!", victimName, challengerName);
                 duels[i] = victim;
-                EmitSoundToClient(i, "ui/duel_challenge_accepted.wav");
-                EmitSoundToClient(victim, "ui/duel_challenge_accepted.wav");
+                EmitSoundToClient(i, CHALLENGE_ACCEPT_SND);
+                EmitSoundToClient(victim, CHALLENGE_ACCEPT_SND);
                 return true;
             }
         }
