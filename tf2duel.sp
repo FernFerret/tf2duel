@@ -389,15 +389,17 @@ public findPlayer(client, const String:search[]) {
     return clientmatch;
 }
 
-public offerDuel(challenger, const String:victimString[]) {
+public bool:offerDuel(challenger, const String:victimString[]) {
     // Search for a player with a fluffy string (not full name).
     new victim = findPlayer(challenger, victimString);
     // If we don't find a player, return.
     if (victim < 1) {
         return false;
     }
-    // Run through another series of checks for valididity
-    if (victim < 1) {
+    // Make sure the person found didn't duel us first!
+    //If so, we fraking accept!
+    if (requests[victim] == challenger) {
+        acceptDuel(challenger);
         return false;
     }
     // Add a request.
@@ -410,9 +412,19 @@ public offerDuel(challenger, const String:victimString[]) {
     return true;
 }
 
+public bool:hasOpenRequest(victim) {
+    for(new i = 1; i < MaxClients; i++) {
+        if (requests[i] == victim) {
+            return true;
+        }
+    }
+    return false;
+
+}
+
 public acceptDuel(victim) {
     if (!isDueling(victim)) {
-        for(new i = 1; i < MAXPLAYERS; i++) {
+        for(new i = 1; i < MaxClients; i++) {
             if (requests[i] == victim) {
                 getNames(i, victim);
                 PrintToChatAll("%s has accepted %s's duel request!", victimName, challengerName);
