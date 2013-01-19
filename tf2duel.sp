@@ -1,6 +1,7 @@
 #include <sourcemod>
 #include <tf2>
 #include <morecolors>
+#include <clientprefs>
 #include <sdktools>
 #pragma semicolon 1
 
@@ -21,7 +22,7 @@ new String:challengerName[MAXNAMELENGTH];
 new String:victimName[MAXNAMELENGTH];
 new String:lastToDisconnectName[MAXNAMELENGTH];
 new lastToDisconnect = 0;
-new Handle:scoreTrie = INVALID_HANDLE;
+new Handle:autoduelCookie = INVALID_HANDLE;
 
 public Plugin:myinfo = {
     name = "TF2 Duel",
@@ -38,9 +39,20 @@ public OnPluginStart() {
     AddCommandListener(Command_Say, "say_team");
     HookEvent("player_death", onPlayerDeath);
     HookEvent("player_team", onChangeTeam);
+    //HookEvent("player_team", onChangeTeam, EventHookMode_Pre);
     HookEvent("player_disconnect", onPlayerDisconnect);
     HookEvent("teamplay_round_win", onRoundOver);
     HookEvent("teamplay_suddendeath_begin", onRoundOver);
+
+    autoduelCookie = RegClientCookie("autoduel", "Auto Duel Enabled", CookieAccess_Protected);
+    cacheSounds();
+}
+
+public OnMapStart() {
+    cacheSounds();
+}
+
+public cacheSounds() {
     PrecacheSound(CHALLENGE_SND);
     PrecacheSound(CHALLENGE_ACCEPT_SND);
     PrecacheSound(DUEL_SCORE_SND);
@@ -347,6 +359,10 @@ public Action:Command_Say(client, const String:command[], argc){
     if (thing == 0) {
         acceptDuel(client);
     }
+    thing = StrContains(duelstring[startidx], "!autoduel", false);
+    if (thing == 0) {
+        setAutoAccept(client);
+    }
     return Plugin_Continue;
 }
 
@@ -415,14 +431,55 @@ public bool:offerDuel(challenger, const String:victimString[]) {
     PrintToChat(victim, "Type \"!accept\" to Mann Up!");
     EmitSoundToClient(victim, CHALLENGE_SND);
     EmitSoundToClient(challenger, CHALLENGE_SND);
-    CreateTimer(20.0, cancelRequest, challenger);
+    CreateTimer(2.0, autoAcceptRequest, challenger);
+    CreateTimer(20.0, autoCancelRequest, challenger);
     return true;
 }
 
 // Cancel the request, either manually or automatically!
 // returns true on a cancel, false if the duel is already going on.
-public Action:cancelRequest(Handle:timer, any:challenger) {
-    PrintToChatAll("Maybe no duel?");
+public Action:autoCancelRequest(Handle:timer, any:challenger) {
+    return cancelRequest(challenger);
+}
+
+public bool:setAutoAccept(client) {
+    new String:cookie[4];
+    new String:color[16];
+    GetClientCookie(client, autoduelCookie, cookie, sizeof(cookie));
+    if (StrEqual(cookie, "on")) {
+        cookie = "off";
+        color = "{red}";
+    } else if(StrEqual(cookie, "off")) {
+        cookie = "on";
+        color = "{green}";
+    } else {
+        cookie = "off";
+        color = "{red}";
+        // Set cookie if client connects the first time
+    }
+    CPrintToChat(client, "{springgreen}Auto Duel {white}has been turned %s%s{white}!", color, cookie);
+    SetClientCookie(client, autoduelCookie, cookie);
+}
+
+public Action:autoAcceptRequest(Handle:timer, any:challenger) {
+    new String:cookie[4];
+    GetClientCookie(requests[challenger], autoduelCookie, cookie, sizeof(cookie));
+    if (StrEqual(cookie, "on")) {
+        acceptDuel(requests[challenger]);
+        return Plugin_Continue;
+    } else if(StrEqual(cookie, "off")) {
+        return Plugin_Continue;
+    } else {
+        // Set cookie if client connects the first time
+        SetClientCookie(requests[challenger], autoduelCookie, "off");
+    }
+    return Plugin_Continue;
+}
+
+
+
+public Action:cancelRequest(any:challenger) {
+    //PrintToChatAll("Maybe no duel?");
     if (duels[challenger] != 0) {
         return Plugin_Continue;
     }
