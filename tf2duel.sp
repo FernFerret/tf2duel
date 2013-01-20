@@ -10,6 +10,8 @@
 #define CHALLENGE_ACCEPT_SND  "ui/duel_challenge_accepted.wav"
 #define DUEL_SCORE_SND        "ui/duel_event.wav"
 #define DUEL_SCORE_BEHIND_SND "ui/duel_score_behind.wav"
+#define RED_TEAM_COLOR "{red}"
+#define BLU_TEAM_COLOR "{blue}"
 
 
 const MAXNAMELENGTH = 256;
@@ -23,6 +25,9 @@ new String:victimName[MAXNAMELENGTH];
 new String:lastToDisconnectName[MAXNAMELENGTH];
 new lastToDisconnect = 0;
 new Handle:autoduelCookie = INVALID_HANDLE;
+
+static String:TEAM_COLOR[4][12] = {"{default}", "{default}", "{red}", "{blue}"};
+//static String:TEAM_COLOR[12] = "{white}";
 
 public Plugin:myinfo = {
     name = "TF2 Duel",
@@ -43,6 +48,7 @@ public OnPluginStart() {
     HookEvent("player_disconnect", onPlayerDisconnect);
     HookEvent("teamplay_round_win", onRoundOver);
     HookEvent("teamplay_suddendeath_begin", onRoundOver);
+    RegConsoleCmd("duel_acccept", commandDuelAccept, "Accept a duel.");
 
     autoduelCookie = RegClientCookie("autoduel", "Auto Duel Enabled", CookieAccess_Protected);
     cacheSounds();
@@ -95,13 +101,15 @@ public finalizeDuels() {
             // The challenger is i
             new challenger = i;
             new victim = duels[i];
+            new cteam = GetClientTeam(challenger);
+            new vteam = GetClientTeam(victim);
             getNames(challenger, victim);
             if (dsChallenger[challenger] > dsVictim[challenger]) {
-                PrintToChatAll("%s defeated %s with a score of %d to %d!", challengerName, victimName , dsChallenger[i], dsVictim[i]);
+                CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[cteam], challengerName, TEAM_COLOR[vteam], victimName , dsChallenger[i], dsVictim[i]);
             } else if (dsChallenger[challenger] < dsVictim[challenger]) {
-                PrintToChatAll("%s defeated %s with a score of %d to %d!", victimName, challengerName , dsVictim[i], dsChallenger[i]);
+                CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[vteam], victimName, TEAM_COLOR[cteam], challengerName , dsChallenger[i], dsVictim[i]);
             } else {
-                PrintToChatAll("You're both losers! %s and %s tied with a score of %d to %d!", challengerName, victimName , dsChallenger[i], dsVictim[i]);
+                CPrintToChatAll("You're both losers! %s%s {default}and %s%s {default}tied with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[cteam], challengerName, TEAM_COLOR[vteam], victimName , dsChallenger[i], dsVictim[i]);
             }
         }
         // Now reset the duels, regardless if the duelstatus was set.
@@ -113,15 +121,21 @@ public finalizeDuels() {
 public overrideDuel(loser, disconnect) {
     new partner = getDuelPartner(loser);
     new duelid = getDuelId(loser);
+    new losercolor = 2;
+    new partnercolor = 3;
     if (partner < 1 || duelid < 1) {
         return false;
     }
+    partnercolor = GetClientTeam(partner);
     // Override the names because disconnect is wonky
     if (disconnect) {
         getNames(-1, partner);
         challengerName = lastToDisconnectName;
     } else {
         getNames(loser, partner);
+    }
+    if (partnercolor == losercolor) {
+        losercolor = 3;
     }
     if (isChallenger(loser) == 1) {
         if(dsChallenger[duelid] >= dsVictim[duelid]) {
@@ -131,7 +145,7 @@ public overrideDuel(loser, disconnect) {
                 dsVictim[duelid] = 1;
             }
         }
-        PrintToChatAll("%s chickened out, so %s won with a score of %d to %d!1", challengerName, victimName, dsVictim[duelid], dsChallenger[duelid]);
+        CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
     } else {
         if(dsChallenger[duelid] <= dsVictim[duelid]) {
             // Reset the score because this guy was in the lead.
@@ -140,7 +154,7 @@ public overrideDuel(loser, disconnect) {
                 dsChallenger[duelid] = 1;
             }
         }
-        PrintToChatAll("%s chickened out, so %s won with a score of %d to %d!", challengerName, victimName, dsChallenger[duelid], dsVictim[duelid]);
+        CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
     }
     // Reset this duelid
     resetDuel(duelid);
@@ -198,10 +212,10 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
     new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
     new assister = GetClientOfUserId(GetEventInt(event, "assister"));
     new bool:increment = false;
+    new cteam = 0;
+    new vteam = 0;
     for (new i = 1; i <= MaxClients; i++) {
         if (((attacker > 0 && i == attacker) || (assister > 0 && assister == i)) && duels[i] == victim) {
-            PrintToServer("Putting a point in Score A: %d", i);
-            PrintToServer("Assister: %d", assister);
             dsChallenger[i]++;
             increment = true;
             // Make sure we got the right person in the kill
@@ -211,11 +225,10 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
             // Don't Call getNames here!
             GetClientName(victim, victimName, MAXNAMELENGTH);
             GetClientName(attacker, challengerName, MAXNAMELENGTH);
+            cteam = GetClientTeam(attacker);
+            vteam = GetClientTeam(victim);
         }
         else if (i == victim && ((attacker > 0 && duels[i] == attacker) || (assister > 0 && duels[i] == assister))) {
-            PrintToServer("Putting a point in Score B: %d", i);
-            PrintToServer("Assister: %d", assister);
-
             dsVictim[i]++;
             increment = true;
             // Make sure we got the right person in the kill
@@ -225,13 +238,14 @@ public onPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast) {
             // Don't Call getNames here!
             GetClientName(attacker, victimName, MAXNAMELENGTH);
             GetClientName(victim, challengerName, MAXNAMELENGTH);
+            cteam = GetClientTeam(victim);
+            vteam = GetClientTeam(attacker);
         }
         if (increment) {
             playScoreSounds(attacker, victim);
             // Don't Call getNames here!
             // We're doing shenanigans with the names.
-
-            PrintToChatAll("The score is: %s: %d, %s: %d", challengerName, dsChallenger[i], victimName, dsVictim[i]);
+            CPrintToChatAll("The score is: %s%s{default}: {gold}%d{default} %s%s{default}: {gold}%d", TEAM_COLOR[cteam], challengerName, dsChallenger[i], TEAM_COLOR[vteam], victimName, dsVictim[i]);
             break;
         }
     }
@@ -407,6 +421,11 @@ public findPlayer(client, const String:search[]) {
 }
 
 public bool:offerDuel(challenger, const String:victimString[]) {
+    if (isDueling(challenger)) {
+        getNames(-1, getDuelPartner(challenger));
+        CPrintToChat(challenger, "You're already dueling %s%s{default}!", TEAM_COLOR[GetClientTeam(getDuelPartner(challenger))], victimName);
+        return false;
+    }
     // Search for a player with a fluffy string (not full name).
     new victim = findPlayer(challenger, victimString);
     // If we don't find a player, return.
@@ -431,7 +450,7 @@ public bool:offerDuel(challenger, const String:victimString[]) {
     PrintToChat(victim, "Type \"!accept\" to Mann Up!");
     EmitSoundToClient(victim, CHALLENGE_SND);
     EmitSoundToClient(challenger, CHALLENGE_SND);
-    CreateTimer(2.0, autoAcceptRequest, challenger);
+    CreateTimer(1.9, autoAcceptRequest, challenger);
     CreateTimer(20.0, autoCancelRequest, challenger);
     return true;
 }
@@ -453,11 +472,11 @@ public bool:setAutoAccept(client) {
         cookie = "on";
         color = "{green}";
     } else {
-        cookie = "off";
-        color = "{red}";
         // Set cookie if client connects the first time
+        cookie = "on";
+        color = "{green}";
     }
-    CPrintToChat(client, "{springgreen}Auto Duel {white}has been turned %s%s{white}!", color, cookie);
+    CPrintToChat(client, "{springgreen}Auto Duel {default}has been turned %s%s{default}!", color, cookie);
     SetClientCookie(client, autoduelCookie, cookie);
 }
 
@@ -490,7 +509,7 @@ public Action:cancelRequest(any:challenger) {
     new victim = requests[challenger];
     requests[challenger] = 0;
     getNames(challenger, victim);
-    PrintToChatAll("%s is far too cowardly to duel %s. For. Shame.", victimName, challengerName);
+    CPrintToChatAll("%s%s{default} is far too cowardly to duel %s%s{default}. {hotpink}For shame{default}.", TEAM_COLOR[GetClientTeam(challenger)], victimName, TEAM_COLOR[GetClientTeam(victim)], challengerName);
     return Plugin_Continue;
 }
 
@@ -504,18 +523,23 @@ public bool:hasOpenRequest(victim) {
 
 }
 
+public Action:commandDuelAccept(client, args) {
+    acceptDuel(client);
+}
+
 public acceptDuel(victim) {
     if (!isDueling(victim)) {
         for(new i = 1; i < MaxClients; i++) {
             if (requests[i] == victim) {
                 getNames(i, victim);
-                PrintToChatAll("%s has accepted %s's duel request!", victimName, challengerName);
+                CPrintToChatAll("%s%s {default}has accepted %s%s's{default} duel request!", TEAM_COLOR[GetClientTeam(victim)], victimName, TEAM_COLOR[GetClientTeam(i)], challengerName);
                 duels[i] = victim;
                 EmitSoundToClient(i, CHALLENGE_ACCEPT_SND);
                 EmitSoundToClient(victim, CHALLENGE_ACCEPT_SND);
                 return true;
             }
         }
+        PrintToChat(victim, "No one has challanged you!");
     }
     return false;
 }
