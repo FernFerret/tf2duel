@@ -23,8 +23,10 @@ new dsVictim[MAXPLAYERS];
 new String:challengerName[MAXNAMELENGTH];
 new String:victimName[MAXNAMELENGTH];
 new String:lastToDisconnectName[MAXNAMELENGTH];
+new String:lastToDisconnectSteamID[48];
 new lastToDisconnect = 0;
 new Handle:autoduelCookie = INVALID_HANDLE;
+new Handle:databaseConn = INVALID_HANDLE;
 
 static String:TEAM_COLOR[4][12] = {"{default}", "{default}", "{red}", "{blue}"};
 //static String:TEAM_COLOR[12] = "{white}";
@@ -49,6 +51,7 @@ public OnPluginStart() {
     HookEvent("teamplay_round_win", onRoundOver);
     HookEvent("teamplay_suddendeath_begin", onRoundOver);
     RegConsoleCmd("duel_acccept", commandDuelAccept, "Accept a duel.");
+    RegConsoleCmd("duel_status", commandDuelAccept, "Accept a duel.");
 
     autoduelCookie = RegClientCookie("autoduel", "Auto Duel Enabled", CookieAccess_Protected);
     cacheSounds();
@@ -72,6 +75,7 @@ public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
 public Action:onPlayerDisconnect(Handle:event, const String:name[], bool:dontBroadcast) {
     lastToDisconnect = GetClientOfUserId(GetEventInt(event, "userid"));
     GetClientName(lastToDisconnect, lastToDisconnectName, MAXNAMELENGTH);
+    GetClientAuthString(lastToDisconnect, lastToDisconnectSteamID, 48);
     return Plugin_Continue;
 }
 public Action:onChangeTeam(Handle:event, const String:name[], bool:dontBroadcast) {
@@ -106,15 +110,36 @@ public finalizeDuels() {
             getNames(challenger, victim);
             if (dsChallenger[challenger] > dsVictim[challenger]) {
                 CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[cteam], challengerName, TEAM_COLOR[vteam], victimName , dsChallenger[i], dsVictim[i]);
+                recordWinner(challenger, victim, challenger);
             } else if (dsChallenger[challenger] < dsVictim[challenger]) {
                 CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[vteam], victimName, TEAM_COLOR[cteam], challengerName , dsChallenger[i], dsVictim[i]);
+                recordWinner(challenger, victim, victim);
             } else {
                 CPrintToChatAll("You're both losers! %s%s {default}and %s%s {default}tied with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[cteam], challengerName, TEAM_COLOR[vteam], victimName , dsChallenger[i], dsVictim[i]);
+                recordWinner(challenger, victim, -1);
             }
         }
         // Now reset the duels, regardless if the duelstatus was set.
         resetDuel(i);
     }
+}
+
+public recordWinner(challenger, victim, winner) {
+    new String:csteamid[48];
+    new String:vsteamid[48];
+    new String:wsteamid[48] = "";
+    decl String:query[1000];
+    new String:map[50];
+    databaseConn = SQL_Connect("tf2duel", true, sql_err, 256);
+    GetCurrentMap(map, 50);
+    GetClientAuthString(challenger, csteamid, 48);
+    GetClientAuthString(victim, vsteamid, 48);
+    if (winner > -1) {
+        GetClientAuthString(winner, wsteamid, 48);
+    }
+    Format(query, 1000, "INSERT INTO duels(challenger, victim, challenger_score, victim_score, winner, map, processed) VALUES('%s', '%s', '%d', '%d', '%s', '%s', '0')", csteamid, vsteamid, dsChallenger[i], dsVictim[i], wsteamid, map);
+    PrintToChatAll(query);
+    SQL_FastQuery(databaseConn, query);
 }
 
 // Used if a player changes or disconnects
@@ -145,6 +170,7 @@ public overrideDuel(loser, disconnect) {
                 dsVictim[duelid] = 1;
             }
         }
+        recordWinner(duelid, victim, duelid);
         CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
     } else {
         if(dsChallenger[duelid] <= dsVictim[duelid]) {
@@ -154,6 +180,7 @@ public overrideDuel(loser, disconnect) {
                 dsChallenger[duelid] = 1;
             }
         }
+        recordWinner(duelid, loser, partner);
         CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
     }
     // Reset this duelid
@@ -536,6 +563,7 @@ public acceptDuel(victim) {
                 duels[i] = victim;
                 EmitSoundToClient(i, CHALLENGE_ACCEPT_SND);
                 EmitSoundToClient(victim, CHALLENGE_ACCEPT_SND);
+                recordWinner(i, victim, i);
                 return true;
             }
         }
