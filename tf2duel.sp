@@ -51,7 +51,7 @@ public OnPluginStart() {
     HookEvent("teamplay_round_win", onRoundOver);
     HookEvent("teamplay_suddendeath_begin", onRoundOver);
     RegConsoleCmd("duel_acccept", commandDuelAccept, "Accept a duel.");
-    RegConsoleCmd("duel_status", commandDuelAccept, "Accept a duel.");
+    RegConsoleCmd("duel_status", commandDuelStatus, "Get the status of the duels.");
 
     autoduelCookie = RegClientCookie("autoduel", "Auto Duel Enabled", CookieAccess_Protected);
     cacheSounds();
@@ -112,11 +112,10 @@ public finalizeDuels() {
                 CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[cteam], challengerName, TEAM_COLOR[vteam], victimName , dsChallenger[i], dsVictim[i]);
                 recordWinner(challenger, victim, challenger);
             } else if (dsChallenger[challenger] < dsVictim[challenger]) {
-                CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[vteam], victimName, TEAM_COLOR[cteam], challengerName , dsChallenger[i], dsVictim[i]);
+                CPrintToChatAll("%s%s {default}defeated %s%s {default}with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[vteam], victimName, TEAM_COLOR[cteam], challengerName, dsVictim[i], dsChallenger[i]);
                 recordWinner(challenger, victim, victim);
             } else {
                 CPrintToChatAll("You're both losers! %s%s {default}and %s%s {default}tied with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[cteam], challengerName, TEAM_COLOR[vteam], victimName , dsChallenger[i], dsVictim[i]);
-                recordWinner(challenger, victim, -1);
             }
         }
         // Now reset the duels, regardless if the duelstatus was set.
@@ -128,6 +127,7 @@ public recordWinner(challenger, victim, winner) {
     new String:csteamid[48];
     new String:vsteamid[48];
     new String:wsteamid[48] = "";
+    new String:sql_err[48] = "";
     decl String:query[1000];
     new String:map[50];
     databaseConn = SQL_Connect("tf2duel", true, sql_err, 256);
@@ -137,8 +137,7 @@ public recordWinner(challenger, victim, winner) {
     if (winner > -1) {
         GetClientAuthString(winner, wsteamid, 48);
     }
-    Format(query, 1000, "INSERT INTO duels(challenger, victim, challenger_score, victim_score, winner, map, processed) VALUES('%s', '%s', '%d', '%d', '%s', '%s', '0')", csteamid, vsteamid, dsChallenger[i], dsVictim[i], wsteamid, map);
-    PrintToChatAll(query);
+    Format(query, 1000, "INSERT INTO duels(challenger, victim, challenger_score, victim_score, winner, map, processed) VALUES('%s', '%s', '%d', '%d', '%s', '%s', '0')", csteamid, vsteamid, dsChallenger[challenger], dsVictim[challenger], wsteamid, map);
     SQL_FastQuery(databaseConn, query);
 }
 
@@ -170,7 +169,7 @@ public overrideDuel(loser, disconnect) {
                 dsVictim[duelid] = 1;
             }
         }
-        recordWinner(duelid, victim, duelid);
+        //recordWinner(duelid, victim, duelid);
         CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
     } else {
         if(dsChallenger[duelid] <= dsVictim[duelid]) {
@@ -180,7 +179,7 @@ public overrideDuel(loser, disconnect) {
                 dsChallenger[duelid] = 1;
             }
         }
-        recordWinner(duelid, loser, partner);
+        //recordWinner(duelid, loser, partner);
         CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
     }
     // Reset this duelid
@@ -423,13 +422,11 @@ public findPlayer(client, const String:search[]) {
             GetClientName(i, nameString, MAXNAMELENGTH);
             // Eliminate some work by removing other team players.
             matchteam = GetClientTeam(i);
-            PrintToServer("Looking at... %s", nameString);
             if (matchteam == searchteam && StrContains(nameString, search, false) > -1) {
                 if (foundmatch) {
                     multimatch = true;
                 }
                 // We got a match!
-                PrintToServer("Found matching client: %s", nameString);
                 foundmatch = true;
                 clientmatch = i;
             }
@@ -455,18 +452,24 @@ public bool:offerDuel(challenger, const String:victimString[]) {
     }
     // Search for a player with a fluffy string (not full name).
     new victim = findPlayer(challenger, victimString);
+    getNames(challenger, victim);
     // If we don't find a player, return.
     if (victim < 1) {
         return false;
     }
+    if (isDueling(victim)) {
+        decl String:otherName[MAXNAMELENGTH];
+        GetClientName(getDuelPartner(victim), otherName, MAXNAMELENGTH);
+        CPrintToChat(challenger, "Sorry, %s%s {default}is already dueling %s{default}!", TEAM_COLOR[GetClientTeam(victim)], victimName, TEAM_COLOR[GetClientTeam(getDuelPartner(victim))], otherName);
+        return false;
+    }
     // Make sure the person found didn't duel us first!
-    //If so, we fraking accept!
+    // If so, we fraking accept!
     if (requests[victim] == challenger) {
         acceptDuel(challenger);
         return false;
     }
     // Make sure someone hasn't already requested a duel
-    getNames(challenger, victim);
     if (hasOpenRequest(victim)) {
         PrintToChat(challenger, "%s has already been asked to duel, try again later!", victimName);
         return false;
@@ -552,6 +555,13 @@ public bool:hasOpenRequest(victim) {
 
 public Action:commandDuelAccept(client, args) {
     acceptDuel(client);
+    return Plugin_Handled;
+}
+
+public Action:commandDuelStatus(client, args) {
+    PrintToConsole(client, "Yay!");
+    LogToFile("tf2duel.log", "Yay!");
+    return Plugin_Handled;
 }
 
 public acceptDuel(victim) {
@@ -563,7 +573,6 @@ public acceptDuel(victim) {
                 duels[i] = victim;
                 EmitSoundToClient(i, CHALLENGE_ACCEPT_SND);
                 EmitSoundToClient(victim, CHALLENGE_ACCEPT_SND);
-                recordWinner(i, victim, i);
                 return true;
             }
         }
