@@ -9,16 +9,20 @@
 
 #include <regex>
 
-#define MORE_COLORS_VERSION		"1.6.2"
+#define MORE_COLORS_VERSION		"1.9.0"
 #define MAX_MESSAGE_LENGTH		256
+#define MAX_BUFFER_LENGTH		(MAX_MESSAGE_LENGTH * 4)
 
 #define COLOR_RED				0xFF4040
 #define COLOR_BLUE				0x99CCFF
 #define COLOR_GRAY				0xCCCCCC
 #define COLOR_GREEN				0x3EFF3E
 
-new bool:CSkipList[MAXPLAYERS + 1] = {false, ...};
-new Handle:CTrie = INVALID_HANDLE;
+#define GAME_DODS				0
+
+new bool:CSkipList[MAXPLAYERS + 1];
+new Handle:CTrie;
+new CTeamColors[][] = {{0xCCCCCC, 0x4D7942, 0xFF4040}}; // Multi-dimensional array for games that don't support SayText2. First index is the game index (as defined by the GAME_ defines), second index is team. 0 = spectator, 1 = team1, 2 = team2
 
 /**
  * Prints a message to a specific client in the chat area.
@@ -38,7 +42,7 @@ stock CPrintToChat(client, const String:message[], any:...) {
 	if(!IsClientInGame(client)) {
 		ThrowError("Client %i is not in game", client);
 	}
-	decl String:buffer[MAX_MESSAGE_LENGTH], String:buffer2[MAX_MESSAGE_LENGTH];
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
 	SetGlobalTransTarget(client);
 	Format(buffer, sizeof(buffer), "\x01%s", message);
 	VFormat(buffer2, sizeof(buffer2), buffer, 3);
@@ -56,9 +60,9 @@ stock CPrintToChat(client, const String:message[], any:...) {
  */
 stock CPrintToChatAll(const String:message[], any:...) {
 	CCheckTrie();
-	decl String:buffer[MAX_MESSAGE_LENGTH], String:buffer2[MAX_MESSAGE_LENGTH];
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
 	for(new i = 1; i <= MaxClients; i++) {
-		if(!IsClientInGame(i) || IsFakeClient(i) || CSkipList[i]) {
+		if(!IsClientInGame(i) || CSkipList[i]) {
 			CSkipList[i] = false;
 			continue;
 		}
@@ -95,7 +99,7 @@ stock CPrintToChatEx(client, author, const String:message[], any:...) {
 	if(!IsClientInGame(author)) {
 		ThrowError("Client %i is not in game", author);
 	}
-	decl String:buffer[MAX_MESSAGE_LENGTH], String:buffer2[MAX_MESSAGE_LENGTH];
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
 	SetGlobalTransTarget(client);
 	Format(buffer, sizeof(buffer), "\x01%s", message);
 	VFormat(buffer2, sizeof(buffer2), buffer, 4);
@@ -107,7 +111,7 @@ stock CPrintToChatEx(client, author, const String:message[], any:...) {
  * Prints a message to all clients in the chat area.
  * Supports color tags and teamcolor tag.
  *
- * @param author	  Author index whos color will be used for teamcolor tag.
+ * @param author	  Author index whose color will be used for teamcolor tag.
  * @param message   Message (formatting rules).
  * @noreturn
  * 
@@ -121,9 +125,9 @@ stock CPrintToChatAllEx(author, const String:message[], any:...) {
 	if(!IsClientInGame(author)) {
 		ThrowError("Client %i is not in game", author);
 	}
-	decl String:buffer[MAX_MESSAGE_LENGTH], String:buffer2[MAX_MESSAGE_LENGTH];
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
 	for(new i = 1; i <= MaxClients; i++) {
-		if(!IsClientInGame(i) || IsFakeClient(i) || CSkipList[i]) {
+		if(!IsClientInGame(i) || CSkipList[i]) {
 			CSkipList[i] = false;
 			continue;
 		}
@@ -146,15 +150,38 @@ stock CSendMessage(client, const String:message[], author=0) {
 	if(author == 0) {
 		author = client;
 	}
+	decl String:buffer[MAX_MESSAGE_LENGTH], String:game[16];
+	GetGameFolderName(game, sizeof(game));
+	strcopy(buffer, sizeof(buffer), message);
 	new UserMsg:index = GetUserMessageId("SayText2");
 	if(index == INVALID_MESSAGE_ID) {
-		PrintToChat(client, "%s", message);
+		if(StrEqual(game, "dod")) {
+			new team = GetClientTeam(author);
+			if(team == 0) {
+				ReplaceString(buffer, sizeof(buffer), "\x03", "\x04", false); // Unassigned gets green
+			} else {
+				decl String:temp[16];
+				Format(temp, sizeof(temp), "\x07%06X", CTeamColors[GAME_DODS][team - 1]);
+				ReplaceString(buffer, sizeof(buffer), "\x03", temp, false);
+			}
+		}
+		PrintToChat(client, "%s", buffer);
 		return;
 	}
-	new Handle:bf = StartMessageOne("SayText2", client, USERMSG_RELIABLE|USERMSG_BLOCKHOOKS);
-	BfWriteByte(bf, author); // Message author
-	BfWriteByte(bf, true);
-	BfWriteString(bf, message);
+	new Handle:buf = StartMessageOne("SayText2", client, USERMSG_RELIABLE|USERMSG_BLOCKHOOKS);
+	if(GetFeatureStatus(FeatureType_Native, "GetUserMessageType") == FeatureStatus_Available && GetUserMessageType() == UM_Protobuf) {
+		PbSetInt(buf, "ent_idx", author);
+		PbSetBool(buf, "chat", true);
+		PbSetString(buf, "msg_name", buffer);
+		PbAddString(buf, "params", "");
+		PbAddString(buf, "params", "");
+		PbAddString(buf, "params", "");
+		PbAddString(buf, "params", "");
+	} else {
+		BfWriteByte(buf, author); // Message author
+		BfWriteByte(buf, true); // Chat message
+		BfWriteString(buf, buffer); // Message text
+	}
 	EndMessage();
 }
 
@@ -196,7 +223,7 @@ stock CCheckTrie() {
  * 
  * On error/Errors:		If the client index passed for author is invalid or not in game.
  */
-stock CReplaceColorCodes(String:buffer[], author=0, bool:removeTags=false, maxlen=MAX_MESSAGE_LENGTH) {
+stock CReplaceColorCodes(String:buffer[], author=0, bool:removeTags=false, maxlen=MAX_BUFFER_LENGTH) {
 	CCheckTrie();
 	if(!removeTags) {
 		ReplaceString(buffer, maxlen, "{default}", "\x01", false);
@@ -211,27 +238,16 @@ stock CReplaceColorCodes(String:buffer[], author=0, bool:removeTags=false, maxle
 		if(!IsClientInGame(author)) {
 			ThrowError("Client %i is not in game", author);
 		}
-		decl String:game[32];
-		GetGameFolderName(game, sizeof(game));
-		if(StrEqual(game, "dod")) {
-			switch(GetClientTeam(author)) {
-				case 1: ReplaceString(buffer, maxlen, "{teamcolor}", "\x07CCCCCC", false);
-				case 2: ReplaceString(buffer, maxlen, "{teamcolor}", "\x074D7942", false);
-				case 3: ReplaceString(buffer, maxlen, "{teamcolor}", "\x07FF4040", false);
-				default: ReplaceString(buffer, maxlen, "{teamcolor}", "\x04", false);
-			}
-		} else {
-			ReplaceString(buffer, maxlen, "{teamcolor}", "\x03", false);
-		}
+		ReplaceString(buffer, maxlen, "{teamcolor}", "\x03", false);
 	}
 	new cursor = 0;
-	new value, Handle:regex;
+	new value;
 	decl String:tag[32], String:buff[32], String:output[maxlen];
 	strcopy(output, maxlen, buffer);
 	// Since the string's size is going to be changing, output will hold the replaced string and we'll search buffer
 	
+	new Handle:regex = CompileRegex("{[a-zA-Z0-9]+}");
 	for(new i = 0; i < 1000; i++) { // The RegEx extension is quite flaky, so we have to loop here :/. This loop is supposed to be infinite and broken by return, but conditions have been added to be safe.
-		regex = CompileRegex("{[a-zA-Z]+}");
 		if(MatchRegex(regex, buffer[cursor]) < 1) {
 			CloseHandle(regex);
 			strcopy(buffer, maxlen, output);
@@ -245,7 +261,6 @@ stock CReplaceColorCodes(String:buffer[], author=0, bool:removeTags=false, maxle
 		ReplaceString(buff, sizeof(buff), "}", "");
 		
 		if(!GetTrieValue(CTrie, buff, value)) {
-			CloseHandle(regex);
 			continue;
 		}
 		
@@ -255,7 +270,6 @@ stock CReplaceColorCodes(String:buffer[], author=0, bool:removeTags=false, maxle
 			Format(buff, sizeof(buff), "\x07%06X", value);
 			ReplaceString(output, maxlen, tag, buff, false);
 		}
-		CloseHandle(regex);
 	}
 	LogError("[MORE COLORS] Infinite loop broken.");
 }
@@ -310,7 +324,7 @@ stock bool:CAddColor(const String:name[], color) {
 	}
 	decl String:newName[64];
 	strcopy(newName, sizeof(newName), name);
-	StrToLower(newName);
+	CStrToLower(newName);
 	SetTrieValue(CTrie, newName, color);
 	return true;
 }
@@ -334,14 +348,14 @@ stock CRemoveTags(String:message[], maxlen) {
  * @noreturn
  */
 stock CReplyToCommand(client, const String:message[], any:...) {
-	decl String:buffer[MAX_MESSAGE_LENGTH * 2];
+	decl String:buffer[MAX_BUFFER_LENGTH];
 	SetGlobalTransTarget(client);
 	VFormat(buffer, sizeof(buffer), message, 3);
 	if(GetCmdReplySource() == SM_REPLY_TO_CONSOLE) {
 		CRemoveTags(buffer, sizeof(buffer));
-		PrintToConsole(client, buffer);
+		PrintToConsole(client, "%s", buffer);
 	} else {
-		CPrintToChat(client, buffer);
+		CPrintToChat(client, "%s", buffer);
 	}
 }
 
@@ -354,15 +368,87 @@ stock CReplyToCommand(client, const String:message[], any:...) {
  * @noreturn
  */
 stock CReplyToCommandEx(client, author, const String:message[], any:...) {
-	decl String:buffer[MAX_MESSAGE_LENGTH * 2];
+	decl String:buffer[MAX_BUFFER_LENGTH];
 	SetGlobalTransTarget(client);
-	VFormat(buffer, sizeof(buffer), message, 3);
+	VFormat(buffer, sizeof(buffer), message, 4);
 	if(GetCmdReplySource() == SM_REPLY_TO_CONSOLE) {
 		CRemoveTags(buffer, sizeof(buffer));
-		PrintToConsole(client, buffer);
+		PrintToConsole(client, "%s", buffer);
 	} else {
-		CPrintToChatEx(client, author, buffer);
+		CPrintToChatEx(client, author, "%s", buffer);
 	}
+}
+
+/**
+ * Shows admin activity with colors
+ * 
+ * @param client		Client performing an action
+ * @param message		Message (formatting rules)
+ * @noreturn
+ */
+stock CShowActivity(client, const String:message[], any:...) {
+	CCheckTrie();
+	if(client < 0 || client > MaxClients) {
+		ThrowError("Invalid client index %d", client);
+	}
+	if(client != 0 && !IsClientInGame(client)) {
+		ThrowError("Client %d is not in game", client);
+	}
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
+	Format(buffer, sizeof(buffer), "\x01%s", message);
+	VFormat(buffer2, sizeof(buffer2), buffer, 3);
+	CReplaceColorCodes(buffer2);
+	ShowActivity(client, "%s", buffer2);
+}
+
+/**
+ * Shows admin activity with colors
+ * 
+ * @param client		Client performing an action
+ * @param tag			Tag to prepend to the message (color tags supported)
+ * @param message		Message (formatting rules)
+ * @noreturn
+ */
+stock CShowActivityEx(client, const String:tag[], const String:message[], any:...) {
+	CCheckTrie();
+	if(client < 0 || client > MaxClients) {
+		ThrowError("Invalid client index %d", client);
+	}
+	if(client != 0 && !IsClientInGame(client)) {
+		ThrowError("Client %d is not in game", client);
+	}
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
+	Format(buffer, sizeof(buffer), "\x01%s", message);
+	VFormat(buffer2, sizeof(buffer2), buffer, 4);
+	CReplaceColorCodes(buffer2);
+	strcopy(buffer, sizeof(buffer), tag);
+	CReplaceColorCodes(buffer);
+	ShowActivityEx(client, tag, "%s", buffer2);
+}
+
+/**
+ * Shows admin activity with colors
+ * 
+ * @param client		Client performing an action
+ * @param tag			Tag to prepend to the message (color tags supported)
+ * @param message		Message (formatting rules)
+ * @noreturn
+ */
+stock CShowActivity2(client, const String:tag[], const String:message[], any:...) {
+	CCheckTrie();
+	if(client < 0 || client > MaxClients) {
+		ThrowError("Invalid client index %d", client);
+	}
+	if(client != 0 && !IsClientInGame(client)) {
+		ThrowError("Client %d is not in game", client);
+	}
+	decl String:buffer[MAX_BUFFER_LENGTH], String:buffer2[MAX_BUFFER_LENGTH];
+	Format(buffer, sizeof(buffer), "\x01%s", message);
+	VFormat(buffer2, sizeof(buffer2), buffer, 4);
+	CReplaceColorCodes(buffer2);
+	strcopy(buffer, sizeof(buffer), tag);
+	CReplaceColorCodes(buffer);
+	ShowActivity2(client, buffer, "%s", buffer2);
 }
 
 /**
@@ -412,9 +498,11 @@ stock Handle:InitColorTrie() {
 	new Handle:hTrie = CreateTrie();
 	SetTrieValue(hTrie, "aliceblue", 0xF0F8FF);
 	SetTrieValue(hTrie, "allies", 0x4D7942); // same as Allies team in DoD:S
+	SetTrieValue(hTrie, "ancient", 0xEB4B4B); // same as Ancient item rarity in Dota 2
 	SetTrieValue(hTrie, "antiquewhite", 0xFAEBD7);
 	SetTrieValue(hTrie, "aqua", 0x00FFFF);
 	SetTrieValue(hTrie, "aquamarine", 0x7FFFD4);
+	SetTrieValue(hTrie, "arcana", 0xADE55C); // same as Arcana item rarity in Dota 2
 	SetTrieValue(hTrie, "axis", 0xFF4040); // same as Axis team in DoD:S
 	SetTrieValue(hTrie, "azure", 0x007FFF);
 	SetTrieValue(hTrie, "beige", 0xF5F5DC);
@@ -428,10 +516,13 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "cadetblue", 0x5F9EA0);
 	SetTrieValue(hTrie, "chartreuse", 0x7FFF00);
 	SetTrieValue(hTrie, "chocolate", 0xD2691E);
+	SetTrieValue(hTrie, "collectors", 0xAA0000); // same as Collector's item quality in TF2
+	SetTrieValue(hTrie, "common", 0xB0C3D9); // same as Common item rarity in Dota 2
 	SetTrieValue(hTrie, "community", 0x70B04A); // same as Community item quality in TF2
 	SetTrieValue(hTrie, "coral", 0xFF7F50);
 	SetTrieValue(hTrie, "cornflowerblue", 0x6495ED);
 	SetTrieValue(hTrie, "cornsilk", 0xFFF8DC);
+	SetTrieValue(hTrie, "corrupted", 0xA32C2E); // same as Corrupted item quality in Dota 2
 	SetTrieValue(hTrie, "crimson", 0xDC143C);
 	SetTrieValue(hTrie, "cyan", 0x00FFFF);
 	SetTrieValue(hTrie, "darkblue", 0x00008B);
@@ -458,9 +549,11 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "dimgray", 0x696969);
 	SetTrieValue(hTrie, "dimgrey", 0x696969);
 	SetTrieValue(hTrie, "dodgerblue", 0x1E90FF);
+	SetTrieValue(hTrie, "exalted", 0xCCCCCD); // same as Exalted item quality in Dota 2
 	SetTrieValue(hTrie, "firebrick", 0xB22222);
 	SetTrieValue(hTrie, "floralwhite", 0xFFFAF0);
 	SetTrieValue(hTrie, "forestgreen", 0x228B22);
+	SetTrieValue(hTrie, "frozen", 0x4983B3); // same as Frozen item quality in Dota 2
 	SetTrieValue(hTrie, "fuchsia", 0xFF00FF);
 	SetTrieValue(hTrie, "fullblue", 0x0000FF);
 	SetTrieValue(hTrie, "fullred", 0xFF0000);
@@ -476,6 +569,7 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "haunted", 0x38F3AB); // same as Haunted item quality in TF2
 	SetTrieValue(hTrie, "honeydew", 0xF0FFF0);
 	SetTrieValue(hTrie, "hotpink", 0xFF69B4);
+	SetTrieValue(hTrie, "immortal", 0xE4AE33); // same as Immortal item rarity in Dota 2
 	SetTrieValue(hTrie, "indianred", 0xCD5C5C);
 	SetTrieValue(hTrie, "indigo", 0x4B0082);
 	SetTrieValue(hTrie, "ivory", 0xFFFFF0);
@@ -483,6 +577,7 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "lavender", 0xE6E6FA);
 	SetTrieValue(hTrie, "lavenderblush", 0xFFF0F5);
 	SetTrieValue(hTrie, "lawngreen", 0x7CFC00);
+	SetTrieValue(hTrie, "legendary", 0xD32CE6); // same as Legendary item rarity in Dota 2
 	SetTrieValue(hTrie, "lemonchiffon", 0xFFFACD);
 	SetTrieValue(hTrie, "lightblue", 0xADD8E6);
 	SetTrieValue(hTrie, "lightcoral", 0xF08080);
@@ -517,6 +612,7 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "mintcream", 0xF5FFFA);
 	SetTrieValue(hTrie, "mistyrose", 0xFFE4E1);
 	SetTrieValue(hTrie, "moccasin", 0xFFE4B5);
+	SetTrieValue(hTrie, "mythical", 0x8847FF); // same as Mythical item rarity in Dota 2
 	SetTrieValue(hTrie, "navajowhite", 0xFFDEAD);
 	SetTrieValue(hTrie, "navy", 0x000080);
 	SetTrieValue(hTrie, "normal", 0xB2B2B2); // same as Normal item quality in TF2
@@ -537,6 +633,7 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "plum", 0xDDA0DD);
 	SetTrieValue(hTrie, "powderblue", 0xB0E0E6);
 	SetTrieValue(hTrie, "purple", 0x800080);
+	SetTrieValue(hTrie, "rare", 0x4B69FF); // same as Rare item rarity in Dota 2
 	SetTrieValue(hTrie, "red", 0xFF4040); // same as RED/Terrorist team color
 	SetTrieValue(hTrie, "rosybrown", 0xBC8F8F);
 	SetTrieValue(hTrie, "royalblue", 0x4169E1);
@@ -561,6 +658,7 @@ stock Handle:InitColorTrie() {
 	SetTrieValue(hTrie, "thistle", 0xD8BFD8);
 	SetTrieValue(hTrie, "tomato", 0xFF6347);
 	SetTrieValue(hTrie, "turquoise", 0x40E0D0);
+	SetTrieValue(hTrie, "uncommon", 0xB0C3D9); // same as Uncommon item rarity in Dota 2
 	SetTrieValue(hTrie, "unique", 0xFFD700); // same as Unique item quality in TF2
 	SetTrieValue(hTrie, "unusual", 0x8650AC); // same as Unusual item quality in TF2
 	SetTrieValue(hTrie, "valve", 0xA50F79); // same as Valve item quality in TF2

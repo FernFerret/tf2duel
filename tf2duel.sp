@@ -74,8 +74,10 @@ public onRoundOver(Handle:event, const String:name[], bool:dontBroadcast) {
 
 public Action:onPlayerDisconnect(Handle:event, const String:name[], bool:dontBroadcast) {
     lastToDisconnect = GetClientOfUserId(GetEventInt(event, "userid"));
-    GetClientName(lastToDisconnect, lastToDisconnectName, MAXNAMELENGTH);
-    GetClientAuthString(lastToDisconnect, lastToDisconnectSteamID, 48);
+    if (lastToDisconnect > 0) {
+        GetClientName(lastToDisconnect, lastToDisconnectName, MAXNAMELENGTH);
+        GetClientAuthString(lastToDisconnect, lastToDisconnectSteamID, 48);
+    }
     return Plugin_Continue;
 }
 public Action:onChangeTeam(Handle:event, const String:name[], bool:dontBroadcast) {
