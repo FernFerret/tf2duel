@@ -184,27 +184,21 @@ public overrideDuel(loser, disconnect) {
     if (partnercolor == losercolor) {
         losercolor = 3;
     }
+    new loserscore = dsVictim[duelid];
+    new winnerscore =  dsChallenger[duelid];
     if (isChallenger(loser) == 1) {
-        if(dsChallenger[duelid] >= dsVictim[duelid]) {
-            // Reset the score because this guy was in the lead.
-            dsChallenger[duelid] = 0;
-            if (dsVictim[duelid] == 0) {
-                dsVictim[duelid] = 1;
-            }
-        }
-        //RecordWinner(duelid, victim, duelid);
-        CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
-    } else {
-        if(dsChallenger[duelid] <= dsVictim[duelid]) {
-            // Reset the score because this guy was in the lead.
-            dsVictim[duelid] = 0;
-            if (dsChallenger[duelid] == 0) {
-                dsChallenger[duelid] = 1;
-            }
-        }
-        //RecordWinner(duelid, loser, partner);
-        CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!", TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, dsVictim[duelid], dsChallenger[duelid]);
+        loserscore = dsChallenger[duelid];
+        winnerscore =  dsVictim[duelid];
     }
+    if(winnerscore <= loserscore) {
+        // Reset the score because this guy was in the lead.
+        loserscore = 0;
+        if (winnerscore == 0) {
+            winnerscore = 1;
+        }
+    }
+    CPrintToChatAll("%s%s{default} chickened out, so %s%s{default} won with a score of {gold}%d{default} to {gold}%d{default}!",
+        TEAM_COLOR[losercolor], challengerName, TEAM_COLOR[partnercolor], victimName, winnerscore, loserscore);
     // Reset this duelid
     ResetDuel(duelid);
     return true;
